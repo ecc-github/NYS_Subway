@@ -1,0 +1,78 @@
+/* style.css */
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    background: #f5f5f5;
+  }
+  
+  #map {
+    width: 100%;
+    height: 100vh;
+  }
+  
+
+  
+  .custom-svg-icon {
+    background: none;
+    border: none;
+  }
+  
+  /* Fixed popup container */
+  #fixed-popup {
+    position: absolute;
+    top: 1%;         /* Popup appears at 10% from the top */
+    left: 1.5%;         /* 5% left margin, making width 90% */
+    width: 97%;
+    min-height: 25%;
+    max-height: 25%;
+    background: #ffffff;
+    border: 20px solid var(--popup-border-color, #c2c2c2); /* Default outline; updated via JS if needed */
+
+    overflow-y: auto;
+    z-index: 1000;
+    display: none;
+    padding: 15px;
+    box-sizing: border-box;
+    border-radius: 20px;
+    font-size: 3em;    /* Standard font size */
+    color: #333;
+  }
+  
+  /* Content within the fixed popup */
+  #fixed-popup .popup-content {
+    margin-bottom: 10px;
+    line-height: 1.5;
+  }
+  
+  /* Close button styling */
+  #fixed-popup .close-btn {
+    position: absolute;
+    top: 5px;
+    right: 10px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 20px;
+    color: #999;
+  }
+  
+  /* Headings within the popup */
+  #fixed-popup h1,
+  #fixed-popup h2,
+  #fixed-popup h3 {
+    margin: 0 0 5px;
+    padding: 0;
+    font-weight: bold;
+    color: #222;
+  }
+  
+
+  /* Set a fixed width and style the popup wrapper */
+.leaflet-popup-content-wrapper {
+    width: 500px !important;
+    max-width: 500px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+  
