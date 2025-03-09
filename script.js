@@ -98,16 +98,20 @@ document.addEventListener('DOMContentLoaded', async function() {
   }
 
   function formatTimeString(deltaSec) {
-    const { minutes, seconds } = formatTimeComponents(deltaSec);
-    return `${minutes} min ${seconds < 10 ? "0" + seconds : seconds} sec`;
+    const isPast = deltaSec < 0;
+    // Use the absolute value to compute minutes and seconds
+    const { minutes, seconds } = formatTimeComponents(Math.abs(deltaSec));
+    // Prepend the negative sign to minutes if needed
+    const minutesStr = isPast ? "-" + minutes : minutes;
+    return `${minutesStr} min ${seconds < 10 ? "0" + seconds : seconds} sec`;
   }
-
+  
   // Helper: returns a formatted remaining time string.
   function getRemainingTime(arrivalTime) {
     const diff = arrivalTime - currentTimeSec;
     return formatTimeString(diff);
   }
-
+  
   // Function to parse CSV data from stops.txt
   function parseStopsCsv(csvString) {
     const lines = csvString.trim().split('\n');
@@ -213,29 +217,30 @@ document.addEventListener('DOMContentLoaded', async function() {
   }
   
 
-  // Function to format time difference in detailed format.
-  function formatTimeDetailed(deltaMillis) {
-    const isPast = deltaMillis < 0;
-    const absDelta = Math.abs(deltaMillis);
-    const totalSeconds = Math.floor(absDelta / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    let formatted = "";
-    if (hours > 0) {
-      formatted = hours + " hrs " + minutes + " min";
+// Function to format time difference in detailed format.
+function formatTimeDetailed(deltaMillis) {
+  const isPast = deltaMillis < 0;
+  const absDelta = Math.abs(deltaMillis);
+  const totalSeconds = Math.floor(absDelta / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  
+  // Use sign only for the minutes portion
+  const sign = isPast ? "-" : "";
+  let formatted = "";
+  if (hours > 0) {
+    formatted = hours + " hrs " + sign + minutes + " min";
+  } else {
+    if (minutes < 5) {
+      formatted = sign + minutes + " min " + (seconds < 10 ? "0" + seconds : seconds) + " sec";
     } else {
-      if (minutes < 5) {
-        formatted = minutes + " min " + (seconds < 10 ? "0" + seconds : seconds) + " sec";
-      } else {
-        formatted = minutes + " min";
-      }
+      formatted = sign + minutes + " min";
     }
-    if (isPast) {
-      formatted = "- " + formatted;
-    }
-    return formatted;
   }
+  return formatted;
+}
+
 
   // Function to build the popup table content.
   function buildPopupTable(stopId, linesSet) {

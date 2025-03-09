@@ -19,25 +19,32 @@ html, body {
     border: none;
   }
   
-  /* Fixed popup container */
   #fixed-popup {
     position: absolute;
-    top: 1%;         /* Popup appears at 10% from the top */
-    left: 1.5%;         /* 5% left margin, making width 90% */
+    top: 1%;
+    left: 1.5%;
     width: 97%;
     min-height: 25%;
     max-height: 25%;
     background: #ffffff;
-    border: 20px solid var(--popup-border-color, #c2c2c2); /* Default outline; updated via JS if needed */
-
+    border: 20px solid var(--popup-border-color, #c2c2c2);
     overflow-y: auto;
     z-index: 1000;
     display: none;
-    padding: 15px;
+    padding: 10px;
     box-sizing: border-box;
     border-radius: 20px;
-    font-size: 3em;    /* Standard font size */
+    font-size: 3em;  /* Mobile default font size */
     color: #333;
+  }
+  
+  /* Non-mobile: adjust font size to 1.5em */
+  @media only screen and (min-width: 1069px) {
+    #fixed-popup {
+      width: 37%;
+      border: 10px solid var(--popup-border-color, #c2c2c2);
+      font-size: 1em;
+    }
   }
   
   /* Content within the fixed popup */
@@ -53,7 +60,7 @@ html, body {
     right: 10px;
     cursor: pointer;
     font-weight: bold;
-    font-size: 20px;
+    font-size:2em;
     color: #999;
   }
   
