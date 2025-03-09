@@ -99,9 +99,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
   function formatTimeString(deltaSec) {
     const isPast = deltaSec < 0;
-    // Use the absolute value to compute minutes and seconds
     const { minutes, seconds } = formatTimeComponents(Math.abs(deltaSec));
-    // Prepend the negative sign to minutes if needed
     const minutesStr = isPast ? "-" + minutes : minutes;
     return `${minutesStr} min ${seconds < 10 ? "0" + seconds : seconds} sec`;
   }
@@ -149,7 +147,6 @@ document.addEventListener('DOMContentLoaded', async function() {
   function createSvgIcon(stopId, lines, scale = 1, highlight = false) {
     let svgHTML = "";
     let iconSize = [0, 0];
-    // Multiply the scale factor if this icon is highlighted (clicked)
     if (highlight) {
       scale = scale * 1.5;
     }
@@ -217,29 +214,27 @@ document.addEventListener('DOMContentLoaded', async function() {
   }
   
 
-// Function to format time difference in detailed format.
-function formatTimeDetailed(deltaMillis) {
-  const isPast = deltaMillis < 0;
-  const absDelta = Math.abs(deltaMillis);
-  const totalSeconds = Math.floor(absDelta / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  
-  // Use sign only for the minutes portion
-  const sign = isPast ? "-" : "";
-  let formatted = "";
-  if (hours > 0) {
-    formatted = hours + " hrs " + sign + minutes + " min";
-  } else {
-    if (minutes < 5) {
-      formatted = sign + minutes + " min " + (seconds < 10 ? "0" + seconds : seconds) + " sec";
+  // Function to format time difference in detailed format.
+  function formatTimeDetailed(deltaMillis) {
+    const isPast = deltaMillis < 0;
+    const absDelta = Math.abs(deltaMillis);
+    const totalSeconds = Math.floor(absDelta / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const sign = isPast ? "-" : "";
+    let formatted = "";
+    if (hours > 0) {
+      formatted = hours + " hrs " + sign + minutes + " min";
     } else {
-      formatted = sign + minutes + " min";
+      if (minutes < 5) {
+        formatted = sign + minutes + " min " + (seconds < 10 ? "0" + seconds : seconds) + " sec";
+      } else {
+        formatted = sign + minutes + " min";
+      }
     }
+    return formatted;
   }
-  return formatted;
-}
 
 
   // Function to build the popup table content.
@@ -466,19 +461,13 @@ function formatTimeDetailed(deltaMillis) {
               marker.linesSet = linesSet;
               marker.on('click', () => {
                 const previousStationId = lastClickedStationId;
-                console.log("Clicked station id:", stopId);
                 const destinationStationId = parent_station ? parent_station : stopId;
-                console.log("Going towards station id:", destinationStationId);
-                console.log("Came from station id:", previousStationId || "N/A");
                 const clickedTrainTime = getFirstTrainTime(stopId);
-                console.log("First train time for clicked station:", clickedTrainTime ? clickedTrainTime : "No upcoming trains");
                 if (destinationStationId && destinationStationId !== stopId) {
                   const destTrainTime = getFirstTrainTime(destinationStationId);
-                  console.log("First train time for destination station:", destTrainTime ? destTrainTime : "No upcoming trains");
                 }
                 if (previousStationId && previousStationId !== stopId) {
                   const previousTrainTime = getFirstTrainTime(previousStationId);
-                  console.log("First train time for previous station:", previousTrainTime ? previousTrainTime : "No upcoming trains");
                 }
                 lastClickedStationId = stopId;
                 if (highlightedMarker && highlightedMarker !== marker) {
@@ -508,152 +497,152 @@ function formatTimeDetailed(deltaMillis) {
         hideFixedPopup();
       }
 
-// --- Update train markers based on trip progress ---
-currentTrainIds.clear();
-combinedEntities.forEach(entity => {
-  if (entity.tripUpdate && entity.tripUpdate.stopTimeUpdate) {
-    const updates = entity.tripUpdate.stopTimeUpdate.filter(u => u.arrival && u.arrival.time);
-    if (updates.length < 2) return;
-    const nowSec = currentTimeSec;
-    let passedStop = null, nextStop = null;
-    updates.forEach(u => {
-      const arrivalTime = parseInt(u.arrival.time);
-      if (arrivalTime <= nowSec) {
-        if (!passedStop || arrivalTime > parseInt(passedStop.arrival.time)) {
-          passedStop = u;
-        }
-      } else {
-        if (!nextStop || arrivalTime < parseInt(nextStop.arrival.time)) {
-          nextStop = u;
-        }
-      }
-    });
-    if (passedStop && nextStop && stopsMap[passedStop.stopId] && stopsMap[nextStop.stopId]) {
-      const departureTime = parseInt(passedStop.arrival.time);
-      const arrivalTime = parseInt(nextStop.arrival.time);
-      if (arrivalTime <= departureTime) return;
-      let fraction = (nowSec - departureTime) / (arrivalTime - departureTime);
-      fraction = Math.max(0, Math.min(1, fraction));
+      // --- Update train markers based on trip progress ---
+      currentTrainIds.clear();
+      combinedEntities.forEach(entity => {
+        if (entity.tripUpdate && entity.tripUpdate.stopTimeUpdate) {
+          const updates = entity.tripUpdate.stopTimeUpdate.filter(u => u.arrival && u.arrival.time);
+          if (updates.length < 2) return;
+          const nowSec = currentTimeSec;
+          let passedStop = null, nextStop = null;
+          updates.forEach(u => {
+            const arrivalTime = parseInt(u.arrival.time);
+            if (arrivalTime <= nowSec) {
+              if (!passedStop || arrivalTime > parseInt(passedStop.arrival.time)) {
+                passedStop = u;
+              }
+            } else {
+              if (!nextStop || arrivalTime < parseInt(nextStop.arrival.time)) {
+                nextStop = u;
+              }
+            }
+          });
+          if (passedStop && nextStop && stopsMap[passedStop.stopId] && stopsMap[nextStop.stopId]) {
+            const departureTime = parseInt(passedStop.arrival.time);
+            const arrivalTime = parseInt(nextStop.arrival.time);
+            if (arrivalTime <= departureTime) return;
+            let fraction = (nowSec - departureTime) / (arrivalTime - departureTime);
+            fraction = Math.max(0, Math.min(1, fraction));
 
-      const routeId = entity.tripUpdate.trip && entity.tripUpdate.trip.routeId 
-                        ? entity.tripUpdate.trip.routeId.toUpperCase().trim() 
-                        : "Unknown";
-      let trainCoord;
-      
-      // Prepare points for snapping.
-      const ptPassed = turf.point([stopsMap[passedStop.stopId].lon, stopsMap[passedStop.stopId].lat]);
-      const ptNext = turf.point([stopsMap[nextStop.stopId].lon, stopsMap[nextStop.stopId].lat]);
-      
-      // Determine the polyline to use: prefer the matching route, otherwise choose the closest.
-      let line = routeLines[routeId];
-      if (!line) {
-        let bestLine = null, bestDistance = Infinity;
-        for (const key in routeLines) {
-          const candidateLine = routeLines[key];
-          const snappedCandidate = turf.nearestPointOnLine(candidateLine, ptPassed);
-          const dist = turf.distance(ptPassed, snappedCandidate);
-          if (dist < bestDistance) {
-            bestDistance = dist;
-            bestLine = candidateLine;
+            const routeId = entity.tripUpdate.trip && entity.tripUpdate.trip.routeId 
+                              ? entity.tripUpdate.trip.routeId.toUpperCase().trim() 
+                              : "Unknown";
+            let trainCoord;
+            
+            // Prepare points for snapping.
+            const ptPassed = turf.point([stopsMap[passedStop.stopId].lon, stopsMap[passedStop.stopId].lat]);
+            const ptNext = turf.point([stopsMap[nextStop.stopId].lon, stopsMap[nextStop.stopId].lat]);
+            
+            // Determine the polyline to use: prefer the matching route, otherwise choose the closest.
+            let line = routeLines[routeId];
+            if (!line) {
+              let bestLine = null, bestDistance = Infinity;
+              for (const key in routeLines) {
+                const candidateLine = routeLines[key];
+                const snappedCandidate = turf.nearestPointOnLine(candidateLine, ptPassed);
+                const dist = turf.distance(ptPassed, snappedCandidate);
+                if (dist < bestDistance) {
+                  bestDistance = dist;
+                  bestLine = candidateLine;
+                }
+              }
+              line = bestLine;
+            }
+            
+            if (line) {
+              const snappedPassed = turf.nearestPointOnLine(line, ptPassed);
+              const snappedNext = turf.nearestPointOnLine(line, ptNext);
+              const d1 = snappedPassed.properties.location;
+              const d2 = snappedNext.properties.location;
+              const dCurrent = d1 + fraction * (d2 - d1);
+              const trainPoint = turf.along(line, dCurrent, {units: 'kilometers'});
+              trainCoord = [trainPoint.geometry.coordinates[1], trainPoint.geometry.coordinates[0]];
+            } else {
+              // Fallback: interpolate directly if no polyline found.
+              const passedCoord = [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon];
+              const nextCoord = [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon];
+              trainCoord = interpolateCoords(passedCoord, nextCoord, fraction);
+            }
+            
+            const timeStr = getRemainingTime(arrivalTime);
+            const nextStationName = stopsMap[nextStop.stopId].name;
+            const tripId = entity.tripUpdate.trip && entity.tripUpdate.trip.tripId ? entity.tripUpdate.trip.tripId : null;
+            if (!tripId) return;
+            currentTrainIds.add(tripId);
+            const trainColor = lineColors[routeId] || "#0000FF";
+            const newRadius = getTrainMarkerRadius(map.getZoom());
+            
+            // --- Build the popup content with station list (unchanged) ---
+            const sortedUpdates = updates.slice().sort((a, b) => parseInt(a.arrival.time) - parseInt(b.arrival.time));
+            let currentIdx = sortedUpdates.findIndex(u => parseInt(u.arrival.time) > nowSec) - 1;
+            if (currentIdx < 0) currentIdx = 0;
+            const startIdx = Math.max(0, currentIdx - 2);
+            const endIdx = Math.min(sortedUpdates.length - 1, currentIdx + 2);
+            let stationListHtml = '<div style="display:flex; flex-direction:column; gap:4px;">';
+            for (let i = startIdx; i <= endIdx; i++) {
+              const stopId = sortedUpdates[i].stopId;
+              const stationName = stopsMap[stopId] ? stopsMap[stopId].name : stopId;
+              if (i === currentIdx) {
+                stationListHtml += `<div style="background:#e0f7fa; padding:4px 8px; border-radius:4px; font-weight:bold; color:#00796b;">${stationName}</div>`;
+              } else {
+                stationListHtml += `<div style="padding:4px 8px;">${stationName}</div>`;
+              }
+            }
+            stationListHtml += '</div>';
+            
+            const popupHTML = `
+              <div style="font-family: 'Arial', sans-serif; background:#fdfdfd; padding:12px; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.2);">
+                <div style="font-size:20px; font-weight:bold; margin-bottom:6px;">Train going to ${nextStationName}</div>
+                <div style="font-size:16px; margin-bottom:10px;">Arriving in ${timeStr}</div>
+                <div style="font-size:16px; margin-bottom:10px;">Current Stop: ${stopsMap[passedStop.stopId].name}</div>
+                <div style="border-top:1px solid #ddd; margin:8px 0;"></div>
+                <div style="font-size:16px; line-height:1.4;">
+                  ${stationListHtml}
+                </div>
+              </div>
+            `;
+            
+            // Update or create train marker with the new popup content
+            if (trainMarkers[tripId]) {
+              trainMarkers[tripId].tripData = {
+                passedCoord: [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon],
+                nextCoord: [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon],
+                departureTime: departureTime,
+                arrivalTime: arrivalTime,
+                routeId: routeId,
+                nextStationName: nextStationName,
+                updates: sortedUpdates,
+                passedStopId: passedStop.stopId,
+                trainColor: trainColor
+              };
+              trainMarkers[tripId].setLatLng(trainCoord);
+              trainMarkers[tripId].setRadius(newRadius);
+              trainMarkers[tripId].setPopupContent(popupHTML);
+            } else {
+              const newMarker = L.circleMarker(trainCoord, {
+                radius: newRadius,
+                color: trainColor,
+                fillColor: trainColor,
+                fillOpacity: 1
+              }).bindPopup(popupHTML);
+              newMarker.tripData = {
+                passedCoord: [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon],
+                nextCoord: [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon],
+                departureTime: departureTime,
+                arrivalTime: arrivalTime,
+                routeId: routeId,
+                nextStationName: nextStationName,
+                updates: sortedUpdates,
+                passedStopId: passedStop.stopId,
+                trainColor: trainColor
+              };
+              trainMarkers[tripId] = newMarker;
+              trainMarkersLayer.addLayer(newMarker);
+            }
           }
         }
-        line = bestLine;
-      }
-      
-      if (line) {
-        const snappedPassed = turf.nearestPointOnLine(line, ptPassed);
-        const snappedNext = turf.nearestPointOnLine(line, ptNext);
-        const d1 = snappedPassed.properties.location;
-        const d2 = snappedNext.properties.location;
-        const dCurrent = d1 + fraction * (d2 - d1);
-        const trainPoint = turf.along(line, dCurrent, {units: 'kilometers'});
-        trainCoord = [trainPoint.geometry.coordinates[1], trainPoint.geometry.coordinates[0]];
-      } else {
-        // Fallback: interpolate directly if no polyline found.
-        const passedCoord = [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon];
-        const nextCoord = [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon];
-        trainCoord = interpolateCoords(passedCoord, nextCoord, fraction);
-      }
-      
-      const timeStr = getRemainingTime(arrivalTime);
-      const nextStationName = stopsMap[nextStop.stopId].name;
-      const tripId = entity.tripUpdate.trip && entity.tripUpdate.trip.tripId ? entity.tripUpdate.trip.tripId : null;
-      if (!tripId) return;
-      currentTrainIds.add(tripId);
-      const trainColor = lineColors[routeId] || "#0000FF";
-      const newRadius = getTrainMarkerRadius(map.getZoom());
-      
-      // --- Build the popup content with station list (unchanged) ---
-      const sortedUpdates = updates.slice().sort((a, b) => parseInt(a.arrival.time) - parseInt(b.arrival.time));
-      let currentIdx = sortedUpdates.findIndex(u => parseInt(u.arrival.time) > nowSec) - 1;
-      if (currentIdx < 0) currentIdx = 0;
-      const startIdx = Math.max(0, currentIdx - 2);
-      const endIdx = Math.min(sortedUpdates.length - 1, currentIdx + 2);
-      let stationListHtml = '<div style="display:flex; flex-direction:column; gap:4px;">';
-      for (let i = startIdx; i <= endIdx; i++) {
-        const stopId = sortedUpdates[i].stopId;
-        const stationName = stopsMap[stopId] ? stopsMap[stopId].name : stopId;
-        if (i === currentIdx) {
-          stationListHtml += `<div style="background:#e0f7fa; padding:4px 8px; border-radius:4px; font-weight:bold; color:#00796b;">${stationName}</div>`;
-        } else {
-          stationListHtml += `<div style="padding:4px 8px;">${stationName}</div>`;
-        }
-      }
-      stationListHtml += '</div>';
-      
-      const popupHTML = `
-        <div style="font-family: 'Arial', sans-serif; background:#fdfdfd; padding:12px; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.2);">
-          <div style="font-size:20px; font-weight:bold; margin-bottom:6px;">Train going to ${nextStationName}</div>
-          <div style="font-size:16px; margin-bottom:10px;">Arriving in ${timeStr}</div>
-          <div style="font-size:16px; margin-bottom:10px;">Current Stop: ${stopsMap[passedStop.stopId].name}</div>
-          <div style="border-top:1px solid #ddd; margin:8px 0;"></div>
-          <div style="font-size:16px; line-height:1.4;">
-            ${stationListHtml}
-          </div>
-        </div>
-      `;
-      
-      // Update or create train marker with the new popup content
-      if (trainMarkers[tripId]) {
-        trainMarkers[tripId].tripData = {
-          passedCoord: [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon],
-          nextCoord: [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon],
-          departureTime: departureTime,
-          arrivalTime: arrivalTime,
-          routeId: routeId,
-          nextStationName: nextStationName,
-          updates: sortedUpdates,
-          passedStopId: passedStop.stopId,
-          trainColor: trainColor
-        };
-        trainMarkers[tripId].setLatLng(trainCoord);
-        trainMarkers[tripId].setRadius(newRadius);
-        trainMarkers[tripId].setPopupContent(popupHTML);
-      } else {
-        const newMarker = L.circleMarker(trainCoord, {
-          radius: newRadius,
-          color: trainColor,
-          fillColor: trainColor,
-          fillOpacity: 1
-        }).bindPopup(popupHTML);
-        newMarker.tripData = {
-          passedCoord: [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon],
-          nextCoord: [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon],
-          departureTime: departureTime,
-          arrivalTime: arrivalTime,
-          routeId: routeId,
-          nextStationName: nextStationName,
-          updates: sortedUpdates,
-          passedStopId: passedStop.stopId,
-          trainColor: trainColor
-        };
-        trainMarkers[tripId] = newMarker;
-        trainMarkersLayer.addLayer(newMarker);
-      }
-    }
-  }
-});
-trainMarkersLayer.bringToFront();
+      });
+      trainMarkersLayer.bringToFront();
 
 
     } catch (err) {
@@ -661,111 +650,110 @@ trainMarkersLayer.bringToFront();
     }
   }
 
-// Interaction flag and debounce helper.
-let isMapInteracting = false;
-function debounce(func, wait) {
-  let timeout;
-  return function(...args) {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func.apply(this, args), wait);
-  };
-}
+  // --- Interaction and Animation Throttling ---
 
-// Update polyline styles (debounced).
-const updatePolylineStyles = debounce(() => {
-  const currentZoom = map.getZoom();
-  polylineLayers.forEach(layer => {
-    layer.setStyle({ weight: getPolylineWeight(currentZoom) });
+  // Use move events rather than mouse events for better accuracy.
+  let isMapInteracting = false;
+  map.on('movestart', () => { isMapInteracting = true; });
+  map.on('moveend', () => { 
+    isMapInteracting = false; 
+    // Update polyline styles after movement stops.
+    const currentZoom = map.getZoom();
+    polylineLayers.forEach(layer => {
+      layer.setStyle({ weight: getPolylineWeight(currentZoom) });
+    });
+    updateTrainMarkerPositions();
   });
-  // Force a train marker update once interaction stops.
-  updateTrainMarkerPositions();
-}, 200);
 
-// Set interaction flags using mousedown and mouseup.
-map.on('mousedown', () => { 
-  isMapInteracting = true; 
-});
-map.on('mouseup', () => { 
-  isMapInteracting = false; 
-  updatePolylineStyles();
-});
+  // Debounce helper (used for other less critical updates)
+  function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+  }
 
+  // --- Throttle the train marker updates ---
+  let lastTrainUpdate = 0;
   function updateTrainMarkerPositions() {
-  const nowSec = currentTimeSec;
-  const currentZoom = map.getZoom();
-  const newRadius = getTrainMarkerRadius(currentZoom);
-  trainMarkersLayer.eachLayer(marker => {
-    const td = marker.tripData;
-    if (td && td.arrivalTime > td.departureTime) {
-      let fraction = (nowSec - td.departureTime) / (td.arrivalTime - td.departureTime);
-      fraction = Math.max(0, Math.min(1, fraction));
-      let newCoord;
-      if (routeLines[td.routeId]) {
-        const line = routeLines[td.routeId];
-        const ptPassed = turf.point([td.passedCoord[1], td.passedCoord[0]]);
-        const ptNext = turf.point([td.nextCoord[1], td.nextCoord[0]]);
-        const snappedPassed = turf.nearestPointOnLine(line, ptPassed, { units: 'kilometers' });
-        const snappedNext = turf.nearestPointOnLine(line, ptNext, { units: 'kilometers' });
-        let d1 = snappedPassed.properties.location;
-        let d2 = snappedNext.properties.location;
-        if (d1 > d2) [d1, d2] = [d2, d1];
-        const dCurrent = d1 + fraction * (d2 - d1);
-        const trainPoint = turf.along(line, dCurrent, { units: 'kilometers' });
-        newCoord = [trainPoint.geometry.coordinates[1], trainPoint.geometry.coordinates[0]];
-      } else {
-        newCoord = interpolateCoords(td.passedCoord, td.nextCoord, fraction);
-      }
-      marker.setLatLng(newCoord);
-      marker.setRadius(newRadius);
-      const timeStr = getRemainingTime(td.arrivalTime);
-      
-      // Rebuild the popup content using stored updates if available
-      if (td.updates) {
-        const sortedUpdates = td.updates;
-        let currentIdx = sortedUpdates.findIndex(u => parseInt(u.arrival.time) > nowSec) - 1;
-        if (currentIdx < 0) currentIdx = 0;
-        const startIdx = Math.max(0, currentIdx - 2);
-        const endIdx = Math.min(sortedUpdates.length - 1, currentIdx + 2);
-        let stationListHtml = '<div style="display:flex; flex-direction:column; gap:4px;">';
-        for (let i = startIdx; i <= endIdx; i++) {
-          const stopId = sortedUpdates[i].stopId;
-          const stationName = stopsMap[stopId] ? stopsMap[stopId].name : stopId;
-          if (i === currentIdx) {
-            stationListHtml += `<div style="background:#e0f7fa; padding:4px 8px; border-radius:4px; font-weight:bold; color:#00796b;">${stationName}</div>`;
-          } else {
-            stationListHtml += `<div style="padding:4px 8px;">${stationName}</div>`;
-          }
+    const now = performance.now();
+    // Only update if at least 100ms have passed since last update.
+    if (now - lastTrainUpdate < 100) return;
+    lastTrainUpdate = now;
+    const nowSec = currentTimeSec;
+    const currentZoom = map.getZoom();
+    const newRadius = getTrainMarkerRadius(currentZoom);
+    trainMarkersLayer.eachLayer(marker => {
+      const td = marker.tripData;
+      if (td && td.arrivalTime > td.departureTime) {
+        let fraction = (nowSec - td.departureTime) / (td.arrivalTime - td.departureTime);
+        fraction = Math.max(0, Math.min(1, fraction));
+        let newCoord;
+        if (routeLines[td.routeId]) {
+          const line = routeLines[td.routeId];
+          const ptPassed = turf.point([td.passedCoord[1], td.passedCoord[0]]);
+          const ptNext = turf.point([td.nextCoord[1], td.nextCoord[0]]);
+          const snappedPassed = turf.nearestPointOnLine(line, ptPassed, { units: 'kilometers' });
+          const snappedNext = turf.nearestPointOnLine(line, ptNext, { units: 'kilometers' });
+          let d1 = snappedPassed.properties.location;
+          let d2 = snappedNext.properties.location;
+          if (d1 > d2) [d1, d2] = [d2, d1];
+          const dCurrent = d1 + fraction * (d2 - d1);
+          const trainPoint = turf.along(line, dCurrent, { units: 'kilometers' });
+          newCoord = [trainPoint.geometry.coordinates[1], trainPoint.geometry.coordinates[0]];
+        } else {
+          newCoord = interpolateCoords(td.passedCoord, td.nextCoord, fraction);
         }
-        stationListHtml += '</div>';
-        const newPopupHTML = `
-          <div style="font-family: 'Arial', sans-serif; background:#fdfdfd; padding:12px; width: 450px; border-radius:8px;">
-            <div style="font-size:3em; font-weight:bold; margin-bottom:6px;">Train going to ${td.nextStationName}</div>
-            <div style="font-size:2em; margin-bottom:10px;">Arriving in ${timeStr}</div>
-            <div style="font-size:2em; margin-bottom:10px;">Current Stop: ${stopsMap[td.passedStopId].name}</div>
-            <div style="border-top:1px solid #ddd; margin:8px 0;"></div>
-            <div style="font-size:2em; line-height:1.4;">
-              ${stationListHtml}
+        marker.setLatLng(newCoord);
+        marker.setRadius(newRadius);
+        const timeStr = getRemainingTime(td.arrivalTime);
+        
+        if (td.updates) {
+          const sortedUpdates = td.updates;
+          let currentIdx = sortedUpdates.findIndex(u => parseInt(u.arrival.time) > nowSec) - 1;
+          if (currentIdx < 0) currentIdx = 0;
+          const startIdx = Math.max(0, currentIdx - 2);
+          const endIdx = Math.min(sortedUpdates.length - 1, currentIdx + 2);
+          let stationListHtml = '<div style="display:flex; flex-direction:column; gap:4px;">';
+          for (let i = startIdx; i <= endIdx; i++) {
+            const stopId = sortedUpdates[i].stopId;
+            const stationName = stopsMap[stopId] ? stopsMap[stopId].name : stopId;
+            if (i === currentIdx) {
+              stationListHtml += `<div style="background:#e0f7fa; padding:4px 8px; border-radius:4px; font-weight:bold; color:#00796b;">${stationName}</div>`;
+            } else {
+              stationListHtml += `<div style="padding:4px 8px;">${stationName}</div>`;
+            }
+          }
+          stationListHtml += '</div>';
+          const newPopupHTML = `
+            <div style="font-family: 'Arial', sans-serif; background:#fdfdfd; padding:12px; width: 450px; border-radius:8px;">
+              <div style="font-size:3em; font-weight:bold; margin-bottom:6px;">Train going to ${td.nextStationName}</div>
+              <div style="font-size:2em; margin-bottom:10px;">Arriving in ${timeStr}</div>
+              <div style="font-size:2em; margin-bottom:10px;">Current Stop: ${stopsMap[td.passedStopId].name}</div>
+              <div style="border-top:1px solid #ddd; margin:8px 0;"></div>
+              <div style="font-size:2em; line-height:1.4;">
+                ${stationListHtml}
+              </div>
             </div>
-          </div>
-        `;
-        marker.setPopupContent(newPopupHTML);
-      } else {
-        marker.setPopupContent(`<div style="font-size:20px;">Train going to ${td.nextStationName} arriving in ${timeStr}</div>`);
+          `;
+          marker.setPopupContent(newPopupHTML);
+        } else {
+          marker.setPopupContent(`<div style="font-size:20px;">Train going to ${td.nextStationName} arriving in ${timeStr}</div>`);
+        }
       }
-    }
-  });
-  trainMarkersLayer.bringToFront();
-}
-
+    });
+    trainMarkersLayer.bringToFront();
+  }
 
   // Animation loop: only update markers when map is not interacting.
-  function animate() {
+  function animate(timestamp) {
     if (!isMapInteracting) {
       updateTrainMarkerPositions();
     }
     requestAnimationFrame(animate);
   }
-  animate();
+  requestAnimationFrame(animate);
 
   // Load stops and update realtime feeds every 10 seconds.
   await loadStops();
