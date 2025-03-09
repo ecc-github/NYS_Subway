@@ -1,5 +1,3 @@
-// script.js
-
 document.addEventListener('DOMContentLoaded', async function() {
   // Detect mobile screen width (adjust threshold as needed)
   const isMobile = window.innerWidth < 1068;
@@ -83,7 +81,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     });
     return minEpoch === Infinity ? null : new Date(minEpoch).toLocaleTimeString();
   }
-  // Expose getFirstTrainTime globally.
   window.getFirstTrainTime = getFirstTrainTime;
 
   // Helper: linear interpolation between two coordinates ([lat, lon])
@@ -105,7 +102,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     return `${minutes} min ${seconds < 10 ? "0" + seconds : seconds} sec`;
   }
 
-  // Helper: returns a formatted remaining time string using the common time reference.
+  // Helper: returns a formatted remaining time string.
   function getRemainingTime(arrivalTime) {
     const diff = arrivalTime - currentTimeSec;
     return formatTimeString(diff);
@@ -140,22 +137,22 @@ document.addEventListener('DOMContentLoaded', async function() {
 
   // Helper: compute a scale factor based on current zoom level.
   function getScaleForZoom(zoom) {
-    const baseZoom = 16;
+    const baseZoom = 15;
     const factorPerZoom = 0.4;
     return Math.max(0.2, 1 + (zoom - baseZoom) * factorPerZoom);
   }
 
-  // Create a custom SVG icon as a Leaflet divIcon.
   function createSvgIcon(stopId, lines, scale = 1, highlight = false) {
     let svgHTML = "";
     let iconSize = [0, 0];
+    // Multiply the scale factor if this icon is highlighted (clicked)
     if (highlight) {
       scale = scale * 1.5;
     }
     if (lines && lines.size > 0) {
       const linesArray = Array.from(lines).sort();
       const count = linesArray.length;
-      if (scale < 1.3) {
+      if (scale < 1.5) {
         const color = lineColors[linesArray[0]] || "#000000";
         const baseRadius = 12;
         const baseStrokeWidth = 4;
@@ -214,6 +211,7 @@ document.addEventListener('DOMContentLoaded', async function() {
       popupAnchor: [0, -iconSize[1] / 2]
     });
   }
+  
 
   // Function to format time difference in detailed format.
   function formatTimeDetailed(deltaMillis) {
@@ -254,7 +252,7 @@ document.addEventListener('DOMContentLoaded', async function() {
       let arrivalsHTML = "";
       if (feedTimes[stopId] && feedTimes[stopId][line]) {
         let times = feedTimes[stopId][line].slice().sort((a, b) => a - b);
-        times = times.slice(0, 100);
+        times = times.slice(0, 4);
         times.forEach(arrivalEpoch => {
           const diff = arrivalEpoch - currentTimeSec;
           if (diff < -300) return;
@@ -314,13 +312,31 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
   }
 
-  // Expose getFirstTrainTime globally.
   window.getFirstTrainTime = getFirstTrainTime;
 
-  // --- NEW: Global dictionary to store route polylines by route_id ---
+  // --- Global dictionary for route polylines and array for polyline layers ---
   let routeLines = {};
+  let polylineLayers = [];
 
-  // Load and add the GeoJSON layer for train lines and store route polylines.
+  // Helper: Calculate polyline weight based on zoom level.
+  function getPolylineWeight(zoom) {
+    const minZoom = 12, maxZoom = 22;
+    const minWeight = 3, maxWeight = 5;
+    if (zoom <= minZoom) return minWeight;
+    if (zoom >= maxZoom) return maxWeight;
+    return minWeight + ((zoom - minZoom) / (maxZoom - minZoom)) * (maxWeight - minWeight);
+  }
+
+  // Helper: Calculate train marker radius based on zoom level.
+  function getTrainMarkerRadius(zoom) {
+    const minZoom = 14, maxZoom = 22;
+    const minRadius = 6, maxRadius = 15;
+    if (zoom <= minZoom) return minRadius;
+    if (zoom >= maxZoom) return maxRadius;
+    return minRadius + ((zoom - minZoom) / (maxZoom - minZoom)) * (maxRadius - minRadius);
+  }
+
+  // Load and add the NYC_Line GeoJSON, storing each polyline layer.
   fetch('NYC_Line.geojson')
     .then(response => response.json())
     .then(data => {
@@ -333,26 +349,23 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (feature.geometry.type === "LineString") {
           const offsetLine = turf.lineOffset(feature, offsetDistance, { units: 'degrees' });
           offsetLine.properties = feature.properties;
-          // Store the polyline by route_id.
           routeLines[routeId] = offsetLine;
           return offsetLine;
         }
         return feature;
       });
-      
-      const offsetGeoJson = {
-        type: "FeatureCollection",
-        features: offsetFeatures
-      };
-      
+      const offsetGeoJson = { type: "FeatureCollection", features: offsetFeatures };
       L.geoJSON(offsetGeoJson, {
         style: function(feature) {
           const routeId = feature.properties.route_id;
           return {
             color: lineColors[routeId] || "#000000",
-            weight: 5,
+            weight: getPolylineWeight(map.getZoom()),
             opacity: 0.8
           };
+        },
+        onEachFeature: function(feature, layer) {
+          polylineLayers.push(layer);
         }
       }).addTo(map);
     })
@@ -371,10 +384,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs',
         'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-si'
       ];
-
       const root = await protobuf.load("gtfs-realtime.proto");
       const FeedMessage = root.lookupType("transit_realtime.FeedMessage");
-
       const feedPromises = endpoints.map(async endpoint => {
         try {
           const response = await fetch(endpoint);
@@ -394,7 +405,6 @@ document.addEventListener('DOMContentLoaded', async function() {
           return null;
         }
       });
-
       const feeds = await Promise.all(feedPromises);
       let combinedEntities = [];
       feeds.forEach(feed => {
@@ -403,8 +413,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
       });
       console.log("Combined feed entities count:", combinedEntities.length);
-
-      // Reset feedTimes and build feedStops.
       let feedStops = {};
       feedTimes = {};
       combinedEntities.forEach(entity => {
@@ -434,7 +442,7 @@ document.addEventListener('DOMContentLoaded', async function() {
       console.log("Combined realtime lines by stop:", feedStops);
       console.log("Feed times by stop:", feedTimes);
 
-      // --- Update station markers (only if zoom >= 15) ---
+      // Update station markers if zoom >= 15.
       const currentZoom = map.getZoom();
       if (currentZoom >= 15) {
         Object.keys(feedStops).forEach(stopId => {
@@ -486,7 +494,7 @@ document.addEventListener('DOMContentLoaded', async function() {
           }
         });
       } else {
-        // If zoom is below 15, remove station markers.
+        // Remove station markers if zoom < 15.
         Object.keys(markerMap).forEach(stopId => {
           if (map.hasLayer(markerMap[stopId])) {
             map.removeLayer(markerMap[stopId]);
@@ -495,153 +503,274 @@ document.addEventListener('DOMContentLoaded', async function() {
         hideFixedPopup();
       }
 
-      // --- Update train markers based on trip progress ---
-      // Do not remove existing train markers; update their positions.
-      currentTrainIds.clear();
-      combinedEntities.forEach(entity => {
-        if (entity.tripUpdate && entity.tripUpdate.stopTimeUpdate) {
-          const updates = entity.tripUpdate.stopTimeUpdate.filter(u => u.arrival && u.arrival.time);
-          if (updates.length < 2) return;
-          const nowSec = currentTimeSec;
-          let passedStop = null;
-          let nextStop = null;
-          updates.forEach(u => {
-            const arrivalTime = parseInt(u.arrival.time);
-            if (arrivalTime <= nowSec) {
-              if (!passedStop || arrivalTime > parseInt(passedStop.arrival.time)) {
-                passedStop = u;
-              }
-            } else {
-              if (!nextStop || arrivalTime < parseInt(nextStop.arrival.time)) {
-                nextStop = u;
-              }
-            }
-          });
-          if (passedStop && nextStop && stopsMap[passedStop.stopId] && stopsMap[nextStop.stopId]) {
-            // Set departureTime equal to passedStop arrival time (no extra wait time)
-            const departureTime = parseInt(passedStop.arrival.time);
-            const arrivalTime = parseInt(nextStop.arrival.time);
-            if (arrivalTime <= departureTime) return;
-            let fraction = (nowSec - departureTime) / (arrivalTime - departureTime);
-            fraction = Math.max(0, Math.min(1, fraction));
+// --- Update train markers based on trip progress ---
+currentTrainIds.clear();
+combinedEntities.forEach(entity => {
+  if (entity.tripUpdate && entity.tripUpdate.stopTimeUpdate) {
+    const updates = entity.tripUpdate.stopTimeUpdate.filter(u => u.arrival && u.arrival.time);
+    if (updates.length < 2) return;
+    const nowSec = currentTimeSec;
+    let passedStop = null, nextStop = null;
+    updates.forEach(u => {
+      const arrivalTime = parseInt(u.arrival.time);
+      if (arrivalTime <= nowSec) {
+        if (!passedStop || arrivalTime > parseInt(passedStop.arrival.time)) {
+          passedStop = u;
+        }
+      } else {
+        if (!nextStop || arrivalTime < parseInt(nextStop.arrival.time)) {
+          nextStop = u;
+        }
+      }
+    });
+    if (passedStop && nextStop && stopsMap[passedStop.stopId] && stopsMap[nextStop.stopId]) {
+      const departureTime = parseInt(passedStop.arrival.time);
+      const arrivalTime = parseInt(nextStop.arrival.time);
+      if (arrivalTime <= departureTime) return;
+      let fraction = (nowSec - departureTime) / (arrivalTime - departureTime);
+      fraction = Math.max(0, Math.min(1, fraction));
 
-            // Use route polyline if available.
-            const routeId = entity.tripUpdate.trip && entity.tripUpdate.trip.routeId 
-                              ? entity.tripUpdate.trip.routeId.toUpperCase().trim() 
-                              : "Unknown";
-            let trainCoord;
-            if (routeLines[routeId]) {
-              const line = routeLines[routeId];
-              const ptPassed = turf.point([stopsMap[passedStop.stopId].lon, stopsMap[passedStop.stopId].lat]);
-              const ptNext = turf.point([stopsMap[nextStop.stopId].lon, stopsMap[nextStop.stopId].lat]);
-              const snappedPassed = turf.nearestPointOnLine(line, ptPassed);
-              const snappedNext = turf.nearestPointOnLine(line, ptNext);
-              const d1 = snappedPassed.properties.location;
-              const d2 = snappedNext.properties.location;
-              const dCurrent = d1 + fraction * (d2 - d1);
-              const trainPoint = turf.along(line, dCurrent, {units: 'kilometers'});
-              trainCoord = [trainPoint.geometry.coordinates[1], trainPoint.geometry.coordinates[0]];
-            } else {
-              const passedCoord = [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon];
-              const nextCoord = [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon];
-              trainCoord = interpolateCoords(passedCoord, nextCoord, fraction);
-            }
-            const timeStr = getRemainingTime(arrivalTime);
-            const nextStationName = stopsMap[nextStop.stopId].name;
-            const tripId = entity.tripUpdate.trip && entity.tripUpdate.trip.tripId ? entity.tripUpdate.trip.tripId : null;
-            if (!tripId) return;
-            currentTrainIds.add(tripId);
-            const trainColor = lineColors[routeId] || "#0000FF";
-            const trainMarkerRadius = 12;  // Fixed size of 12 pixels
-            if (trainMarkers[tripId]) {
-              trainMarkers[tripId].tripData = {
-                passedCoord: [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon],
-                nextCoord: [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon],
-                departureTime: departureTime,
-                arrivalTime: arrivalTime,
-                routeId: routeId,
-                nextStationName: nextStationName
-              };
-              trainMarkers[tripId].setLatLng(trainCoord);
-              trainMarkers[tripId].setRadius(trainMarkerRadius);
-              trainMarkers[tripId].setPopupContent(`<div style="font-size:20px;">Train going to ${nextStationName} arriving in ${timeStr}</div>`);
-            } else {
-              const newMarker = L.circleMarker(trainCoord, {
-                radius: trainMarkerRadius,
-                color: trainColor,
-                fillColor: trainColor,
-                fillOpacity: 1
-              }).bindPopup(`<div style="font-size:20px;">Train going to ${nextStationName} arriving in ${timeStr}</div>`);
-              newMarker.tripData = {
-                passedCoord: [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon],
-                nextCoord: [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon],
-                departureTime: departureTime,
-                arrivalTime: arrivalTime,
-                routeId: routeId,
-                nextStationName: nextStationName
-              };
-              trainMarkers[tripId] = newMarker;
-              trainMarkersLayer.addLayer(newMarker);
-            }
+      const routeId = entity.tripUpdate.trip && entity.tripUpdate.trip.routeId 
+                        ? entity.tripUpdate.trip.routeId.toUpperCase().trim() 
+                        : "Unknown";
+      let trainCoord;
+      
+      // Prepare points for snapping.
+      const ptPassed = turf.point([stopsMap[passedStop.stopId].lon, stopsMap[passedStop.stopId].lat]);
+      const ptNext = turf.point([stopsMap[nextStop.stopId].lon, stopsMap[nextStop.stopId].lat]);
+      
+      // Determine the polyline to use: prefer the matching route, otherwise choose the closest.
+      let line = routeLines[routeId];
+      if (!line) {
+        let bestLine = null, bestDistance = Infinity;
+        for (const key in routeLines) {
+          const candidateLine = routeLines[key];
+          const snappedCandidate = turf.nearestPointOnLine(candidateLine, ptPassed);
+          const dist = turf.distance(ptPassed, snappedCandidate);
+          if (dist < bestDistance) {
+            bestDistance = dist;
+            bestLine = candidateLine;
           }
         }
-      });
+        line = bestLine;
+      }
+      
+      if (line) {
+        const snappedPassed = turf.nearestPointOnLine(line, ptPassed);
+        const snappedNext = turf.nearestPointOnLine(line, ptNext);
+        const d1 = snappedPassed.properties.location;
+        const d2 = snappedNext.properties.location;
+        const dCurrent = d1 + fraction * (d2 - d1);
+        const trainPoint = turf.along(line, dCurrent, {units: 'kilometers'});
+        trainCoord = [trainPoint.geometry.coordinates[1], trainPoint.geometry.coordinates[0]];
+      } else {
+        // Fallback: interpolate directly if no polyline found.
+        const passedCoord = [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon];
+        const nextCoord = [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon];
+        trainCoord = interpolateCoords(passedCoord, nextCoord, fraction);
+      }
+      
+      const timeStr = getRemainingTime(arrivalTime);
+      const nextStationName = stopsMap[nextStop.stopId].name;
+      const tripId = entity.tripUpdate.trip && entity.tripUpdate.trip.tripId ? entity.tripUpdate.trip.tripId : null;
+      if (!tripId) return;
+      currentTrainIds.add(tripId);
+      const trainColor = lineColors[routeId] || "#0000FF";
+      const newRadius = getTrainMarkerRadius(map.getZoom());
+      
+      // --- Build the popup content with station list (unchanged) ---
+      const sortedUpdates = updates.slice().sort((a, b) => parseInt(a.arrival.time) - parseInt(b.arrival.time));
+      let currentIdx = sortedUpdates.findIndex(u => parseInt(u.arrival.time) > nowSec) - 1;
+      if (currentIdx < 0) currentIdx = 0;
+      const startIdx = Math.max(0, currentIdx - 2);
+      const endIdx = Math.min(sortedUpdates.length - 1, currentIdx + 2);
+      let stationListHtml = '<div style="display:flex; flex-direction:column; gap:4px;">';
+      for (let i = startIdx; i <= endIdx; i++) {
+        const stopId = sortedUpdates[i].stopId;
+        const stationName = stopsMap[stopId] ? stopsMap[stopId].name : stopId;
+        if (i === currentIdx) {
+          stationListHtml += `<div style="background:#e0f7fa; padding:4px 8px; border-radius:4px; font-weight:bold; color:#00796b;">${stationName}</div>`;
+        } else {
+          stationListHtml += `<div style="padding:4px 8px;">${stationName}</div>`;
+        }
+      }
+      stationListHtml += '</div>';
+      
+      const popupHTML = `
+        <div style="font-family: 'Arial', sans-serif; background:#fdfdfd; padding:12px; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.2);">
+          <div style="font-size:20px; font-weight:bold; margin-bottom:6px;">Train going to ${nextStationName}</div>
+          <div style="font-size:16px; margin-bottom:10px;">Arriving in ${timeStr}</div>
+          <div style="font-size:16px; margin-bottom:10px;">Current Stop: ${stopsMap[passedStop.stopId].name}</div>
+          <div style="border-top:1px solid #ddd; margin:8px 0;"></div>
+          <div style="font-size:16px; line-height:1.4;">
+            ${stationListHtml}
+          </div>
+        </div>
+      `;
+      
+      // Update or create train marker with the new popup content
+      if (trainMarkers[tripId]) {
+        trainMarkers[tripId].tripData = {
+          passedCoord: [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon],
+          nextCoord: [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon],
+          departureTime: departureTime,
+          arrivalTime: arrivalTime,
+          routeId: routeId,
+          nextStationName: nextStationName,
+          updates: sortedUpdates,
+          passedStopId: passedStop.stopId,
+          trainColor: trainColor
+        };
+        trainMarkers[tripId].setLatLng(trainCoord);
+        trainMarkers[tripId].setRadius(newRadius);
+        trainMarkers[tripId].setPopupContent(popupHTML);
+      } else {
+        const newMarker = L.circleMarker(trainCoord, {
+          radius: newRadius,
+          color: trainColor,
+          fillColor: trainColor,
+          fillOpacity: 1
+        }).bindPopup(popupHTML);
+        newMarker.tripData = {
+          passedCoord: [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon],
+          nextCoord: [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon],
+          departureTime: departureTime,
+          arrivalTime: arrivalTime,
+          routeId: routeId,
+          nextStationName: nextStationName,
+          updates: sortedUpdates,
+          passedStopId: passedStop.stopId,
+          trainColor: trainColor
+        };
+        trainMarkers[tripId] = newMarker;
+        trainMarkersLayer.addLayer(newMarker);
+      }
+    }
+  }
+});
+trainMarkersLayer.bringToFront();
 
-
-      // Bring the train marker layer to the front.
-      trainMarkersLayer.bringToFront();
 
     } catch (err) {
       console.error('Error updating feeds:', err);
     }
   }
 
-  // Function to update train marker positions every second.
+// Interaction flag and debounce helper.
+let isMapInteracting = false;
+function debounce(func, wait) {
+  let timeout;
+  return function(...args) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func.apply(this, args), wait);
+  };
+}
+
+// Update polyline styles (debounced).
+const updatePolylineStyles = debounce(() => {
+  const currentZoom = map.getZoom();
+  polylineLayers.forEach(layer => {
+    layer.setStyle({ weight: getPolylineWeight(currentZoom) });
+  });
+  // Force a train marker update once interaction stops.
+  updateTrainMarkerPositions();
+}, 200);
+
+// Set interaction flags using mousedown and mouseup.
+map.on('mousedown', () => { 
+  isMapInteracting = true; 
+});
+map.on('mouseup', () => { 
+  isMapInteracting = false; 
+  updatePolylineStyles();
+});
+
   function updateTrainMarkerPositions() {
-    const currentZoom = map.getZoom();
-    const nowSec = currentTimeSec;
-    trainMarkersLayer.eachLayer(marker => {
-      const td = marker.tripData;
-      if (td && td.arrivalTime > td.departureTime) {
-        let fraction = (nowSec - td.departureTime) / (td.arrivalTime - td.departureTime);
-        fraction = Math.max(0, Math.min(1, fraction));
-        let newCoord;
-        if (routeLines[td.routeId]) {
-          const line = routeLines[td.routeId];
-          const ptPassed = turf.point([td.passedCoord[1], td.passedCoord[0]]);
-          const ptNext = turf.point([td.nextCoord[1], td.nextCoord[0]]);
-          const snappedPassed = turf.nearestPointOnLine(line, ptPassed);
-          const snappedNext = turf.nearestPointOnLine(line, ptNext);
-          const d1 = snappedPassed.properties.location;
-          const d2 = snappedNext.properties.location;
-          const dCurrent = d1 + fraction * (d2 - d1);
-          const trainPoint = turf.along(line, dCurrent, {units: 'kilometers'});
-          newCoord = [trainPoint.geometry.coordinates[1], trainPoint.geometry.coordinates[0]];
-        } else {
-          newCoord = interpolateCoords(td.passedCoord, td.nextCoord, fraction);
+  const nowSec = currentTimeSec;
+  const currentZoom = map.getZoom();
+  const newRadius = getTrainMarkerRadius(currentZoom);
+  trainMarkersLayer.eachLayer(marker => {
+    const td = marker.tripData;
+    if (td && td.arrivalTime > td.departureTime) {
+      let fraction = (nowSec - td.departureTime) / (td.arrivalTime - td.departureTime);
+      fraction = Math.max(0, Math.min(1, fraction));
+      let newCoord;
+      if (routeLines[td.routeId]) {
+        const line = routeLines[td.routeId];
+        const ptPassed = turf.point([td.passedCoord[1], td.passedCoord[0]]);
+        const ptNext = turf.point([td.nextCoord[1], td.nextCoord[0]]);
+        const snappedPassed = turf.nearestPointOnLine(line, ptPassed, { units: 'kilometers' });
+        const snappedNext = turf.nearestPointOnLine(line, ptNext, { units: 'kilometers' });
+        let d1 = snappedPassed.properties.location;
+        let d2 = snappedNext.properties.location;
+        if (d1 > d2) [d1, d2] = [d2, d1];
+        const dCurrent = d1 + fraction * (d2 - d1);
+        const trainPoint = turf.along(line, dCurrent, { units: 'kilometers' });
+        newCoord = [trainPoint.geometry.coordinates[1], trainPoint.geometry.coordinates[0]];
+      } else {
+        newCoord = interpolateCoords(td.passedCoord, td.nextCoord, fraction);
+      }
+      marker.setLatLng(newCoord);
+      marker.setRadius(newRadius);
+      const timeStr = getRemainingTime(td.arrivalTime);
+      
+      // Rebuild the popup content using stored updates if available
+      if (td.updates) {
+        const sortedUpdates = td.updates;
+        let currentIdx = sortedUpdates.findIndex(u => parseInt(u.arrival.time) > nowSec) - 1;
+        if (currentIdx < 0) currentIdx = 0;
+        const startIdx = Math.max(0, currentIdx - 2);
+        const endIdx = Math.min(sortedUpdates.length - 1, currentIdx + 2);
+        let stationListHtml = '<div style="display:flex; flex-direction:column; gap:4px;">';
+        for (let i = startIdx; i <= endIdx; i++) {
+          const stopId = sortedUpdates[i].stopId;
+          const stationName = stopsMap[stopId] ? stopsMap[stopId].name : stopId;
+          if (i === currentIdx) {
+            stationListHtml += `<div style="background:#e0f7fa; padding:4px 8px; border-radius:4px; font-weight:bold; color:#00796b;">${stationName}</div>`;
+          } else {
+            stationListHtml += `<div style="padding:4px 8px;">${stationName}</div>`;
+          }
         }
-        marker.setLatLng(newCoord);
-        marker.setRadius(12);  // Fixed radius of 12 pixels
-        const timeStr = getRemainingTime(td.arrivalTime);
+        stationListHtml += '</div>';
+        const newPopupHTML = `
+          <div style="font-family: 'Arial', sans-serif; background:#fdfdfd; padding:12px; width: 450px; border-radius:8px;">
+            <div style="font-size:3em; font-weight:bold; margin-bottom:6px;">Train going to ${td.nextStationName}</div>
+            <div style="font-size:2em; margin-bottom:10px;">Arriving in ${timeStr}</div>
+            <div style="font-size:2em; margin-bottom:10px;">Current Stop: ${stopsMap[td.passedStopId].name}</div>
+            <div style="border-top:1px solid #ddd; margin:8px 0;"></div>
+            <div style="font-size:2em; line-height:1.4;">
+              ${stationListHtml}
+            </div>
+          </div>
+        `;
+        marker.setPopupContent(newPopupHTML);
+      } else {
         marker.setPopupContent(`<div style="font-size:20px;">Train going to ${td.nextStationName} arriving in ${timeStr}</div>`);
       }
-    });
-    trainMarkersLayer.bringToFront();
-  }
+    }
+  });
+  trainMarkersLayer.bringToFront();
+}
 
+
+  // Animation loop: only update markers when map is not interacting.
+  function animate() {
+    if (!isMapInteracting) {
+      updateTrainMarkerPositions();
+    }
+    requestAnimationFrame(animate);
+  }
+  animate();
 
   // Load stops and update realtime feeds every 10 seconds.
   await loadStops();
   updateFeed();
   setInterval(updateFeed, 10000);
 
-  // Update train marker positions every second.
-  setInterval(updateTrainMarkerPositions, 1000);
-
   // Adjust station marker sizes when zoom changes.
   map.on('zoomend', () => {
     const currentZoom = map.getZoom();
-    if (currentZoom < 14) {
+    if (currentZoom < 15) {
       Object.keys(markerMap).forEach(stopId => {
         if (map.hasLayer(markerMap[stopId])) {
           map.removeLayer(markerMap[stopId]);
@@ -672,41 +801,5 @@ document.addEventListener('DOMContentLoaded', async function() {
       highlightedMarker = null;
     }
   });
-
-  // Load and add the GeoJSON layer for train lines.
-  fetch('NYC_Line.geojson')
-    .then(response => response.json())
-    .then(data => {
-      const offsetFeatures = data.features.map(feature => {
-        const routeId = feature.properties.route_id;
-        let offsetDistance = 0;
-        if (!isNaN(parseFloat(routeId))) {
-          offsetDistance = 0.00005 * (parseInt(routeId) - 1);
-        }
-        if (feature.geometry.type === "LineString") {
-          const offsetLine = turf.lineOffset(feature, offsetDistance, { units: 'degrees' });
-          offsetLine.properties = feature.properties;
-          // Store the route polyline.
-          routeLines[routeId] = offsetLine;
-          return offsetLine;
-        }
-        return feature;
-      });
-      const offsetGeoJson = {
-        type: "FeatureCollection",
-        features: offsetFeatures
-      };
-      L.geoJSON(offsetGeoJson, {
-        style: function(feature) {
-          const routeId = feature.properties.route_id;
-          return {
-            color: lineColors[routeId] || "#000000",
-            weight: 5,
-            opacity: 0.8
-          };
-        }
-      }).addTo(map);
-    })
-    .catch(err => console.error("Error loading GeoJSON:", err));
 
 });
