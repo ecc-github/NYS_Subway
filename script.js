@@ -1,4 +1,79 @@
 document.addEventListener('DOMContentLoaded', async function() {
+  // Toggle Turf processing (set to true to disable Turf calculations)
+  const disableTurf = true;
+
+  // ===== New Helper Functions for Polyline Interpolation =====
+  // Compute Haversine distance (in meters) between two [lat, lon] points.
+  function getDistance(coord1, coord2) {
+    const R = 6371000; // Earth's radius in meters
+    const toRad = Math.PI / 180;
+    const dLat = (coord2[0] - coord1[0]) * toRad;
+    const dLon = (coord2[1] - coord1[1]) * toRad;
+    const lat1 = coord1[0] * toRad;
+    const lat2 = coord2[0] * toRad;
+    const a = Math.sin(dLat / 2) ** 2 +
+              Math.cos(lat1) * Math.cos(lat2) *
+              Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  // Compute cumulative distances along an array of [lat, lon] points.
+  function computeCumulativeDistances(coords) {
+    let cumDist = [0];
+    for (let i = 1; i < coords.length; i++) {
+      cumDist.push(cumDist[i - 1] + getDistance(coords[i - 1], coords[i]));
+    }
+    return cumDist;
+  }
+
+  // Linear interpolation between two [lat, lon] coordinates.
+  function interpolatePoint(coord1, coord2, fraction) {
+    return [
+      coord1[0] + (coord2[0] - coord1[0]) * fraction,
+      coord1[1] + (coord2[1] - coord1[1]) * fraction
+    ];
+  }
+
+  // Given an array of [lat, lon] coordinates and their cumulative distances,
+  // return the interpolated coordinate at targetDistance along the polyline.
+  function getPointAlongPolyline(latLonCoords, cumDist, targetDistance) {
+    for (let i = 0; i < cumDist.length - 1; i++) {
+      if (targetDistance >= cumDist[i] && targetDistance <= cumDist[i + 1]) {
+        const segFraction = (targetDistance - cumDist[i]) / (cumDist[i + 1] - cumDist[i]);
+        return interpolatePoint(latLonCoords[i], latLonCoords[i + 1], segFraction);
+      }
+    }
+    return latLonCoords[latLonCoords.length - 1];
+  }
+
+  // Project a point onto a line segment; returns the fractional position (0 to 1)
+  function projectPointOnSegment(coord, segStart, segEnd) {
+    const dx = segEnd[0] - segStart[0];
+    const dy = segEnd[1] - segStart[1];
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return 0;
+    const t = ((coord[0] - segStart[0]) * dx + (coord[1] - segStart[1]) * dy) / lenSq;
+    return Math.max(0, Math.min(1, t));
+  }
+
+  // Given a polyline (array of [lat, lon]) and its cumulative distances,
+  // find the closest projection of a coordinate onto the polyline and return its cumulative distance.
+  function getClosestDistanceOnPolyline(latLonCoords, cumDist, coord) {
+    let best = { distance: Infinity, projected: 0 };
+    for (let i = 0; i < latLonCoords.length - 1; i++) {
+      const t = projectPointOnSegment(coord, latLonCoords[i], latLonCoords[i + 1]);
+      const proj = interpolatePoint(latLonCoords[i], latLonCoords[i + 1], t);
+      const d = getDistance(coord, proj);
+      if (d < best.distance) {
+        best.distance = d;
+        best.projected = cumDist[i] + t * (cumDist[i + 1] - cumDist[i]);
+      }
+    }
+    return best.projected;
+  }
+  // ===== End of New Helpers =====
+
   // Detect mobile screen width (adjust threshold as needed)
   const isMobile = window.innerWidth < 1068;
 
@@ -63,9 +138,9 @@ document.addEventListener('DOMContentLoaded', async function() {
   // Declare popupTimer only once globally
   let popupTimer = null;
 
-  // Global current time (in seconds) updated every second.
+  // Global current time (in seconds) updated every 0.1 seconds.
   let currentTimeSec = Date.now() / 1000;
-  setInterval(() => { currentTimeSec = Date.now() / 1000; }, 1000);
+  setInterval(() => { currentTimeSec = Date.now() / 1000; }, 100);
 
   // Helper: returns the first upcoming train time (as a local time string) for a given station id.
   function getFirstTrainTime(stopId) {
@@ -131,9 +206,8 @@ document.addEventListener('DOMContentLoaded', async function() {
       if (!response.ok) throw new Error(`Failed to load stops.txt: ${response.status}`);
       const csvData = await response.text();
       parseStopsCsv(csvData);
-      console.log("Stops loaded:", stopsMap);
     } catch (error) {
-      console.error("Error loading stops.txt:", error);
+      // Error handling omitted
     }
   }
 
@@ -235,7 +309,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     return formatted;
   }
-
 
   // Function to build the popup table content.
   function buildPopupTable(stopId, linesSet) {
@@ -347,10 +420,20 @@ document.addEventListener('DOMContentLoaded', async function() {
           offsetDistance = 0.00005 * (parseInt(routeId) - 1);
         }
         if (feature.geometry.type === "LineString") {
-          const offsetLine = turf.lineOffset(feature, offsetDistance, { units: 'degrees' });
-          offsetLine.properties = feature.properties;
-          routeLines[routeId] = offsetLine;
-          return offsetLine;
+          let lineFeature;
+          if (!disableTurf) {
+            lineFeature = turf.lineOffset(feature, offsetDistance, { units: 'degrees' });
+            lineFeature.properties = feature.properties;
+          } else {
+            // When Turf is disabled, use the original geometry and precompute polyline data.
+            lineFeature = feature;
+            // Convert coordinates from [lon, lat] to [lat, lon]
+            const latLonCoords = lineFeature.geometry.coordinates.map(c => [c[1], c[0]]);
+            lineFeature.latLonCoords = latLonCoords;
+            lineFeature.cumDistances = computeCumulativeDistances(latLonCoords);
+          }
+          routeLines[routeId] = lineFeature;
+          return lineFeature;
         }
         return feature;
       });
@@ -369,7 +452,180 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
       }).addTo(map);
     })
-    .catch(err => console.error("Error loading GeoJSON:", err));
+    .catch(() => { /* error handling omitted */ });
+
+  // --- Asynchronous scheduling helpers ---
+  function scheduleAsync(fn) {
+    if (window.requestIdleCallback) {
+      requestIdleCallback(fn);
+    } else {
+      setTimeout(fn, 50);
+    }
+  }
+
+  let updateMarkersScheduled = false;
+  function scheduleUpdateTrainMarkerPositions() {
+    if (!updateMarkersScheduled) {
+      updateMarkersScheduled = true;
+      scheduleAsync(() => {
+        updateTrainMarkerPositions();
+        updateMarkersScheduled = false;
+      });
+    }
+  }
+
+  // --- Function to update train marker positions (throttled) ---
+  let lastTrainUpdate = 0;
+  function updateTrainMarkerPositions() {
+    const now = performance.now();
+    if (now - lastTrainUpdate < 100) return;
+    lastTrainUpdate = now;
+    const nowSec = currentTimeSec;
+    const currentZoom = map.getZoom();
+    let newRadius = getTrainMarkerRadius(currentZoom);
+    // Increase clickable area on mobile
+    if (isMobile) {
+      newRadius *= 1.5;
+    }
+    trainMarkersLayer.eachLayer(marker => {
+      const td = marker.tripData;
+      if (td && td.arrivalTime > td.departureTime) {
+        let fraction = (nowSec - td.departureTime) / (td.arrivalTime - td.departureTime);
+        fraction = Math.max(0, Math.min(1, fraction));
+        let newCoord;
+        if (disableTurf && routeLines[td.routeId] && routeLines[td.routeId].cumDistances) {
+          const lineFeature = routeLines[td.routeId];
+          const latLonCoords = lineFeature.latLonCoords;
+          const cumDist = lineFeature.cumDistances;
+          const startDistance = getClosestDistanceOnPolyline(latLonCoords, cumDist, td.passedCoord);
+          const endDistance = getClosestDistanceOnPolyline(latLonCoords, cumDist, td.nextCoord);
+          const targetDistance = startDistance + fraction * (endDistance - startDistance);
+          newCoord = getPointAlongPolyline(latLonCoords, cumDist, targetDistance);
+        } else if (!disableTurf && routeLines[td.routeId]) {
+          const line = routeLines[td.routeId];
+          const ptPassed = turf.point([td.passedCoord[1], td.passedCoord[0]]);
+          const ptNext = turf.point([td.nextCoord[1], td.nextCoord[0]]);
+          const snappedPassed = turf.nearestPointOnLine(line, ptPassed, { units: 'kilometers' });
+          const snappedNext = turf.nearestPointOnLine(line, ptNext, { units: 'kilometers' });
+          let d1 = snappedPassed.properties.location;
+          let d2 = snappedNext.properties.location;
+          if (d1 > d2) [d1, d2] = [d2, d1];
+          const dCurrent = d1 + fraction * (d2 - d1);
+          const trainPoint = turf.along(line, dCurrent, { units: 'kilometers' });
+          newCoord = [trainPoint.geometry.coordinates[1], trainPoint.geometry.coordinates[0]];
+        } else {
+          newCoord = interpolateCoords(td.passedCoord, td.nextCoord, fraction);
+        }
+        marker.setLatLng(newCoord);
+        marker.setRadius(newRadius);
+        const timeStr = getRemainingTime(td.arrivalTime);
+        if (td.updates) {
+          const sortedUpdates = td.updates;
+          let currentIdx = sortedUpdates.findIndex(u => parseInt(u.arrival.time) > nowSec) - 1;
+          if (currentIdx < 0) currentIdx = 0;
+          const startIdx = Math.max(0, currentIdx - 2);
+          const endIdx = Math.min(sortedUpdates.length - 1, currentIdx + 2);
+          let stationListHtml = '<div style="display:flex; flex-direction:column; gap:4px;">';
+          for (let i = startIdx; i <= endIdx; i++) {
+            const stopId = sortedUpdates[i].stopId;
+            const stationName = stopsMap[stopId] ? stopsMap[stopId].name : stopId;
+            if (i === currentIdx) {
+              stationListHtml += `<div style="background:#e0f7fa; padding:4px 8px; border-radius:4px; font-weight:bold; color:#00796b;">${stationName}</div>`;
+            } else {
+              stationListHtml += `<div style="padding:4px 8px;">${stationName}</div>`;
+            }
+          }
+          stationListHtml += '</div>';
+          const newPopupHTML = `
+            <div style="font-family: 'Arial', sans-serif; background:#fdfdfd; padding:12px; width: 450px; border-radius:8px;">
+              <div style="font-size:3em; font-weight:bold; margin-bottom:6px;">Train going to ${td.nextStationName}</div>
+              <div style="font-size:2em; margin-bottom:10px;">Arriving in ${timeStr}</div>
+              <div style="font-size:2em; margin-bottom:10px;">Current Stop: ${stopsMap[td.passedStopId].name}</div>
+              <div style="border-top:1px solid #ddd; margin:8px 0;"></div>
+              <div style="font-size:2em; line-height:1.4;">
+                ${stationListHtml}
+              </div>
+            </div>
+          `;
+          marker.setPopupContent(newPopupHTML);
+        } else {
+          marker.setPopupContent(`<div style="font-size:20px;">Train going to ${td.nextStationName} arriving in ${timeStr}</div>`);
+        }
+      }
+    });
+    trainMarkersLayer.bringToFront();
+  }
+
+  // --- Interaction and Animation Throttling ---
+  let isMapInteracting = false;
+  map.on('movestart', () => { isMapInteracting = true; });
+  map.on('moveend', () => { 
+    isMapInteracting = false; 
+    const currentZoom = map.getZoom();
+    scheduleAsync(() => {
+      polylineLayers.forEach(layer => {
+        layer.setStyle({ weight: getPolylineWeight(currentZoom) });
+      });
+    });
+    scheduleUpdateTrainMarkerPositions();
+  });
+
+  // Debounce helper for less critical updates
+  function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+  }
+
+  function animate() {
+    if (!isMapInteracting) {
+      scheduleUpdateTrainMarkerPositions();
+    }
+    requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
+
+  // Load stops and update realtime feeds every 10 seconds.
+  await loadStops();
+  updateFeed();
+  setInterval(updateFeed, 1000);
+
+  // Adjust station marker sizes when zoom changes.
+  map.on('zoomend', debounce(() => {
+    const currentZoom = map.getZoom();
+    if (currentZoom < 14) {
+      Object.keys(markerMap).forEach(stopId => {
+        if (map.hasLayer(markerMap[stopId])) {
+          map.removeLayer(markerMap[stopId]);
+        }
+      });
+      hideFixedPopup();
+    } else {
+      updateFeed();
+      Object.keys(markerMap).forEach(stopId => {
+        if (!map.hasLayer(markerMap[stopId])) {
+          markerMap[stopId].addTo(map);
+        }
+      });
+    }
+  }, 200));
+
+  // Hide popup and unselect highlighted station when map is clicked.
+  map.on('click', () => {
+    hideFixedPopup();
+    if (highlightedMarker) {
+      const normalIcon = createSvgIcon(
+        highlightedMarker.stopId,
+        highlightedMarker.linesSet,
+        getScaleForZoom(map.getZoom()),
+        false
+      );
+      highlightedMarker.setIcon(normalIcon);
+      highlightedMarker = null;
+    }
+  });
 
   // Function to fetch and process realtime feeds.
   async function updateFeed() {
@@ -390,7 +646,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         try {
           const response = await fetch(endpoint);
           if (!response.ok) {
-            console.error(`Feed fetch failed for ${endpoint} with status ${response.status}`);
             return null;
           }
           const buffer = await response.arrayBuffer();
@@ -401,7 +656,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             defaults: true,
           });
         } catch (e) {
-          console.error(`Error processing ${endpoint}:`, e);
           return null;
         }
       });
@@ -412,7 +666,6 @@ document.addEventListener('DOMContentLoaded', async function() {
           combinedEntities = combinedEntities.concat(feed.entity);
         }
       });
-      console.log("Combined feed entities count:", combinedEntities.length);
       let feedStops = {};
       feedTimes = {};
       combinedEntities.forEach(entity => {
@@ -439,12 +692,10 @@ document.addEventListener('DOMContentLoaded', async function() {
           feedStops[stopId].add(line);
         }
       });
-      console.log("Combined realtime lines by stop:", feedStops);
-      console.log("Feed times by stop:", feedTimes);
 
       // Update station markers if zoom >= 15.
       const currentZoom = map.getZoom();
-      if (currentZoom >= 15) {
+      if (currentZoom >= 14) {
         Object.keys(feedStops).forEach(stopId => {
           if (stopsMap[stopId]) {
             const { lat, lon, name, parent_station } = stopsMap[stopId];
@@ -488,7 +739,6 @@ document.addEventListener('DOMContentLoaded', async function() {
           }
         });
       } else {
-        // Remove station markers if zoom < 15.
         Object.keys(markerMap).forEach(stopId => {
           if (map.hasLayer(markerMap[stopId])) {
             map.removeLayer(markerMap[stopId]);
@@ -528,37 +778,29 @@ document.addEventListener('DOMContentLoaded', async function() {
                               ? entity.tripUpdate.trip.routeId.toUpperCase().trim() 
                               : "Unknown";
             let trainCoord;
-            
-            // Prepare points for snapping.
-            const ptPassed = turf.point([stopsMap[passedStop.stopId].lon, stopsMap[passedStop.stopId].lat]);
-            const ptNext = turf.point([stopsMap[nextStop.stopId].lon, stopsMap[nextStop.stopId].lat]);
-            
-            // Determine the polyline to use: prefer the matching route, otherwise choose the closest.
-            let line = routeLines[routeId];
-            if (!line) {
-              let bestLine = null, bestDistance = Infinity;
-              for (const key in routeLines) {
-                const candidateLine = routeLines[key];
-                const snappedCandidate = turf.nearestPointOnLine(candidateLine, ptPassed);
-                const dist = turf.distance(ptPassed, snappedCandidate);
-                if (dist < bestDistance) {
-                  bestDistance = dist;
-                  bestLine = candidateLine;
-                }
-              }
-              line = bestLine;
-            }
-            
-            if (line) {
-              const snappedPassed = turf.nearestPointOnLine(line, ptPassed);
-              const snappedNext = turf.nearestPointOnLine(line, ptNext);
-              const d1 = snappedPassed.properties.location;
-              const d2 = snappedNext.properties.location;
+            if (disableTurf && routeLines[routeId] && routeLines[routeId].cumDistances) {
+              const lineFeature = routeLines[routeId];
+              const latLonCoords = lineFeature.latLonCoords;
+              const cumDist = lineFeature.cumDistances;
+              const passedCoord = [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon];
+              const nextCoord = [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon];
+              const startDistance = getClosestDistanceOnPolyline(latLonCoords, cumDist, passedCoord);
+              const endDistance = getClosestDistanceOnPolyline(latLonCoords, cumDist, nextCoord);
+              const targetDistance = startDistance + fraction * (endDistance - startDistance);
+              trainCoord = getPointAlongPolyline(latLonCoords, cumDist, targetDistance);
+            } else if (!disableTurf && routeLines[routeId]) {
+              const line = routeLines[routeId];
+              const ptPassed = turf.point([stopsMap[passedStop.stopId].lon, stopsMap[passedStop.stopId].lat]);
+              const ptNext = turf.point([stopsMap[nextStop.stopId].lon, stopsMap[nextStop.stopId].lat]);
+              const snappedPassed = turf.nearestPointOnLine(line, ptPassed, { units: 'kilometers' });
+              const snappedNext = turf.nearestPointOnLine(line, ptNext, { units: 'kilometers' });
+              let d1 = snappedPassed.properties.location;
+              let d2 = snappedNext.properties.location;
+              if (d1 > d2) [d1, d2] = [d2, d1];
               const dCurrent = d1 + fraction * (d2 - d1);
-              const trainPoint = turf.along(line, dCurrent, {units: 'kilometers'});
+              const trainPoint = turf.along(line, dCurrent, { units: 'kilometers' });
               trainCoord = [trainPoint.geometry.coordinates[1], trainPoint.geometry.coordinates[0]];
             } else {
-              // Fallback: interpolate directly if no polyline found.
               const passedCoord = [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon];
               const nextCoord = [stopsMap[nextStop.stopId].lat, stopsMap[nextStop.stopId].lon];
               trainCoord = interpolateCoords(passedCoord, nextCoord, fraction);
@@ -570,9 +812,12 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (!tripId) return;
             currentTrainIds.add(tripId);
             const trainColor = lineColors[routeId] || "#0000FF";
-            const newRadius = getTrainMarkerRadius(map.getZoom());
+            let newRadius = getTrainMarkerRadius(map.getZoom());
+            // Increase clickable area on mobile devices
+            if (isMobile) {
+              newRadius *= 1.5;
+            }
             
-            // --- Build the popup content with station list (unchanged) ---
             const sortedUpdates = updates.slice().sort((a, b) => parseInt(a.arrival.time) - parseInt(b.arrival.time));
             let currentIdx = sortedUpdates.findIndex(u => parseInt(u.arrival.time) > nowSec) - 1;
             if (currentIdx < 0) currentIdx = 0;
@@ -602,7 +847,6 @@ document.addEventListener('DOMContentLoaded', async function() {
               </div>
             `;
             
-            // Update or create train marker with the new popup content
             if (trainMarkers[tripId]) {
               trainMarkers[tripId].tripData = {
                 passedCoord: [stopsMap[passedStop.stopId].lat, stopsMap[passedStop.stopId].lon],
@@ -641,158 +885,10 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
           }
         }
-      });
+    });
       trainMarkersLayer.bringToFront();
-
-
     } catch (err) {
-      console.error('Error updating feeds:', err);
+      // Error handling omitted
     }
   }
-
-  // --- Interaction and Animation Throttling ---
-
-  // Use move events rather than mouse events for better accuracy.
-  let isMapInteracting = false;
-  map.on('movestart', () => { isMapInteracting = true; });
-  map.on('moveend', () => { 
-    isMapInteracting = false; 
-    // Update polyline styles after movement stops.
-    const currentZoom = map.getZoom();
-    polylineLayers.forEach(layer => {
-      layer.setStyle({ weight: getPolylineWeight(currentZoom) });
-    });
-    updateTrainMarkerPositions();
-  });
-
-  // Debounce helper (used for other less critical updates)
-  function debounce(func, wait) {
-    let timeout;
-    return function(...args) {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => func.apply(this, args), wait);
-    };
-  }
-
-  // --- Throttle the train marker updates ---
-  let lastTrainUpdate = 0;
-  function updateTrainMarkerPositions() {
-    const now = performance.now();
-    // Only update if at least 100ms have passed since last update.
-    if (now - lastTrainUpdate < 100) return;
-    lastTrainUpdate = now;
-    const nowSec = currentTimeSec;
-    const currentZoom = map.getZoom();
-    const newRadius = getTrainMarkerRadius(currentZoom);
-    trainMarkersLayer.eachLayer(marker => {
-      const td = marker.tripData;
-      if (td && td.arrivalTime > td.departureTime) {
-        let fraction = (nowSec - td.departureTime) / (td.arrivalTime - td.departureTime);
-        fraction = Math.max(0, Math.min(1, fraction));
-        let newCoord;
-        if (routeLines[td.routeId]) {
-          const line = routeLines[td.routeId];
-          const ptPassed = turf.point([td.passedCoord[1], td.passedCoord[0]]);
-          const ptNext = turf.point([td.nextCoord[1], td.nextCoord[0]]);
-          const snappedPassed = turf.nearestPointOnLine(line, ptPassed, { units: 'kilometers' });
-          const snappedNext = turf.nearestPointOnLine(line, ptNext, { units: 'kilometers' });
-          let d1 = snappedPassed.properties.location;
-          let d2 = snappedNext.properties.location;
-          if (d1 > d2) [d1, d2] = [d2, d1];
-          const dCurrent = d1 + fraction * (d2 - d1);
-          const trainPoint = turf.along(line, dCurrent, { units: 'kilometers' });
-          newCoord = [trainPoint.geometry.coordinates[1], trainPoint.geometry.coordinates[0]];
-        } else {
-          newCoord = interpolateCoords(td.passedCoord, td.nextCoord, fraction);
-        }
-        marker.setLatLng(newCoord);
-        marker.setRadius(newRadius);
-        const timeStr = getRemainingTime(td.arrivalTime);
-        
-        if (td.updates) {
-          const sortedUpdates = td.updates;
-          let currentIdx = sortedUpdates.findIndex(u => parseInt(u.arrival.time) > nowSec) - 1;
-          if (currentIdx < 0) currentIdx = 0;
-          const startIdx = Math.max(0, currentIdx - 2);
-          const endIdx = Math.min(sortedUpdates.length - 1, currentIdx + 2);
-          let stationListHtml = '<div style="display:flex; flex-direction:column; gap:4px;">';
-          for (let i = startIdx; i <= endIdx; i++) {
-            const stopId = sortedUpdates[i].stopId;
-            const stationName = stopsMap[stopId] ? stopsMap[stopId].name : stopId;
-            if (i === currentIdx) {
-              stationListHtml += `<div style="background:#e0f7fa; padding:4px 8px; border-radius:4px; font-weight:bold; color:#00796b;">${stationName}</div>`;
-            } else {
-              stationListHtml += `<div style="padding:4px 8px;">${stationName}</div>`;
-            }
-          }
-          stationListHtml += '</div>';
-          const newPopupHTML = `
-            <div style="font-family: 'Arial', sans-serif; background:#fdfdfd; padding:12px; width: 450px; border-radius:8px;">
-              <div style="font-size:3em; font-weight:bold; margin-bottom:6px;">Train going to ${td.nextStationName}</div>
-              <div style="font-size:2em; margin-bottom:10px;">Arriving in ${timeStr}</div>
-              <div style="font-size:2em; margin-bottom:10px;">Current Stop: ${stopsMap[td.passedStopId].name}</div>
-              <div style="border-top:1px solid #ddd; margin:8px 0;"></div>
-              <div style="font-size:2em; line-height:1.4;">
-                ${stationListHtml}
-              </div>
-            </div>
-          `;
-          marker.setPopupContent(newPopupHTML);
-        } else {
-          marker.setPopupContent(`<div style="font-size:20px;">Train going to ${td.nextStationName} arriving in ${timeStr}</div>`);
-        }
-      }
-    });
-    trainMarkersLayer.bringToFront();
-  }
-
-  // Animation loop: only update markers when map is not interacting.
-  function animate(timestamp) {
-    if (!isMapInteracting) {
-      updateTrainMarkerPositions();
-    }
-    requestAnimationFrame(animate);
-  }
-  requestAnimationFrame(animate);
-
-  // Load stops and update realtime feeds every 10 seconds.
-  await loadStops();
-  updateFeed();
-  setInterval(updateFeed, 10000);
-
-  // Adjust station marker sizes when zoom changes.
-  map.on('zoomend', () => {
-    const currentZoom = map.getZoom();
-    if (currentZoom < 15) {
-      Object.keys(markerMap).forEach(stopId => {
-        if (map.hasLayer(markerMap[stopId])) {
-          map.removeLayer(markerMap[stopId]);
-        }
-      });
-      hideFixedPopup();
-    } else {
-      updateFeed();
-      Object.keys(markerMap).forEach(stopId => {
-        if (!map.hasLayer(markerMap[stopId])) {
-          markerMap[stopId].addTo(map);
-        }
-      });
-    }
-  });
-
-  // Hide popup and unselect highlighted station when map is clicked.
-  map.on('click', () => {
-    hideFixedPopup();
-    if (highlightedMarker) {
-      const normalIcon = createSvgIcon(
-        highlightedMarker.stopId,
-        highlightedMarker.linesSet,
-        getScaleForZoom(map.getZoom()),
-        false
-      );
-      highlightedMarker.setIcon(normalIcon);
-      highlightedMarker = null;
-    }
-  });
-
 });

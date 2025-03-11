@@ -24,8 +24,8 @@ html, body {
     top: 1%;
     left: 1.5%;
     width: 97%;
-    min-height: 25%;
-    max-height: 25%;
+    min-height: 30%;
+    max-height: 30%;
     background: #ffffff;
     border: 20px solid var(--popup-border-color, #c2c2c2);
     overflow-y: auto;
